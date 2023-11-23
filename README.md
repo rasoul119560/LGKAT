@@ -44,8 +44,9 @@ python main.py --dataset:music --aggregator:concat --n_epochs:10 --neighbor_samp
 
 ## About implementation
 
-We build our model based on the implementations of Personalized knowledge-aware recommendation with collaborative
-and attentive graph convolutional networks (https://github.com/daiquanyu/COAT).
+We build our model based on the implementations of "Personalized knowledge-aware recommendation with collaborative
+and attentive graph convolutional networks." by "Quanyu Dai, Xiao-Ming Wub, Lu Fanb, Qimai Li, Han Liu, Xiaotong Zhang,Dan Wang,
+, Guli Lind, Keping Yang" (https://github.com/daiquanyu/COAT).
 
 ## About Datasets
 The datasets available from the corresponding author
