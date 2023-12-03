@@ -62,7 +62,7 @@ class KGCN(object):
         self.node_dropout_flag = args.node_dropout_flag
 
         # Create Model Parameters (i.e., Initialize Weights).
-        if self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'NGCF', 'GCMC',
+        if self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'NGCF', 'GCN', 'GCMC',
                                'LightGCN']:
             self.weights_ngcf = self._init_weights_ngcf()
 
@@ -143,10 +143,12 @@ class KGCN(object):
             # [batch_size, dim]
             self.item_embeddings_final, self.aggregators = self.aggregate(entities, relations)
 
-        elif self.model_type in ['GCMC', 'NGCF', 'LightGCN']:
+        elif self.model_type in ['GCMC', 'NGCF', 'GCN', 'LightGCN']:
             # ngcf, gcn or gcmc for user and item embeddings
             if self.alg_type == 'ngcf':
                 self.ua_embeddings, self.ia_embeddings = self._create_ngcf_embed()
+            elif self.alg_type == 'gcn':
+                self.ua_embeddings, self.ia_embeddings = self._create_gcn_embed()
             elif self.alg_type == 'gcmc':
                 self.ua_embeddings, self.ia_embeddings = self._create_gcmc_embed()
             elif self.alg_type == 'lightgcn':
@@ -157,10 +159,12 @@ class KGCN(object):
             self.user_embeddings_final = tf.nn.embedding_lookup(params=self.ua_embeddings, ids=self.user_indices)
             self.item_embeddings_final = tf.nn.embedding_lookup(params=self.ia_embeddings, ids=self.item_indices)
 
-        elif self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_LightGCN']:
+        elif self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN']:
             # ngcf, gcn or gcmc for user embeddings
             if self.alg_type == 'ngcf':
                 self.ua_embeddings, self.ia_embeddings = self._create_ngcf_embed()
+            elif self.alg_type == 'gcn':
+                self.ua_embeddings, self.ia_embeddings = self._create_gcn_embed()
             elif self.alg_type == 'gcmc':
                 self.ua_embeddings, self.ia_embeddings = self._create_gcmc_embed()
             elif self.alg_type == 'lightgcn':
@@ -513,6 +517,39 @@ class KGCN(object):
         # all_embeddings = all_embeddings[-1]
         # # Method 3
         # all_embeddings = tf.add_n(all_embeddings)
+
+        u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
+        return u_g_embeddings, i_g_embeddings
+
+    def _create_gcn_embed(self):
+        if self.node_dropout_flag:
+            # node dropout.
+            temp = self._convert_sp_mat_to_sp_tensor(self.norm_adj)
+            A = self._dropout_sparse(temp, 1 - self.node_dropout[0], self.n_nonzero_elems)
+        else:
+            A = self._convert_sp_mat_to_sp_tensor(self.norm_adj)
+
+        embeddings = tf.concat([self.user_emb_matrix, self.entity_emb_matrix[:self.n_item, :]], axis=0)  # E
+        # embeddings = tf.concat([self.user_emb_matrix, self.item_emb_matrix], axis=0)  # E
+
+        all_embeddings = [embeddings]
+
+        for k in range(0, self.n_layers):
+            for _ in range(self.smoothing_steps):
+                embeddings = tf.sparse.sparse_dense_matmul(A, embeddings)
+
+            embeddings = tf.nn.leaky_relu(
+                tf.matmul(embeddings, self.weights_ngcf['W_gc_%d' % k]) + self.weights_ngcf['b_gc_%d' % k])
+            embeddings = tf.nn.dropout(embeddings, rate=1 - (1 - self.mess_dropout[k]))
+
+            all_embeddings += [embeddings]
+
+        # # Method 1
+        # all_embeddings = tf.concat(all_embeddings, 1)  # Eq. (9)
+        # # Method 2
+        # all_embeddings = all_embeddings[-1]
+        # Method 3
+        all_embeddings = tf.add_n(all_embeddings)
 
         u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
         return u_g_embeddings, i_g_embeddings
