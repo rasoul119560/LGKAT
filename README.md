@@ -3,7 +3,7 @@
  
 This is our implementation for the following paper:
 
->Rasoul Hassanzadeh, Vahid Majidneghad, Ali Farzan, Bahman Arasteh
+>Rasoul Hassanzadeh, Vahid Majidneghad, Bahman Arasteh
 
 
 Corresponding Author: Vahid Majidneghad (vahid.majidnezhad at iau.ac.ir)
