@@ -1,5 +1,5 @@
 
-# LGKAT: A novel recommender system using LightGCN and personalized Knowledge-aware Attention sub-networks
+# A novel recommender system using light graph convolutional network and personalized knowledge-aware attention sub-network
  
 This is our implementation for the following paper:
 
