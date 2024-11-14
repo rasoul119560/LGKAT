@@ -11,32 +11,22 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
     adj_entity, adj_relation = data[7], data[8]
     user_item_adj = data[9]
 
-    '''
-    ***********************************************
-    best epoch recording for different runs
-    '''
     auc = []
     f1_score = []
     precision = []
     recall = []
     epochs_auc = []
     epochs_recall = []
+    train_losses = []  # New: To store the loss values
+
+
 
     RUNS = args.runs
-    '''
-    ***********************************************
-    '''
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 
-    '''
-    ***********************************************
-    logging and loading paths
-    '''
     ckpt_save_path_1 = '../Pretrain/{}/{}/ctr/'.format(args.model_type, args.dataset)
     ckpt_save_path_2 = '../Pretrain/{}/{}/topk/'.format(args.model_type, args.dataset)
-    ckpt_restore_path_1 = '../Pretrain/{}/{}/ctr/'.format(args.model_type, args.dataset)
-    ckpt_restore_path_2 = '../Pretrain/{}/{}/topk/'.format(args.model_type, args.dataset)
 
     if not os.path.exists(ckpt_save_path_1):
         os.makedirs(ckpt_save_path_1)
@@ -50,31 +40,19 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
         pretrain = {'user': user_emb, 'entity': entity_emb, 'relation': relation_emb}
     else:
         pretrain = None
-    '''
-    ***********************************************
-    '''
+
     args.seed += 1
     print('----------')
     print(args.seed)
     print('----------')
+
     for r in range(RUNS):
         tf.compat.v1.reset_default_graph()
 
-        model = KGCN(args, n_user, n_item , n_entity, n_relation, adj_entity, adj_relation, user_item_adj, pretrain=pretrain)
+        model = KGCN(args, n_user, n_item, n_entity, n_relation, adj_entity, adj_relation, user_item_adj, pretrain=pretrain)
 
-        '''
-        ***********************************************
-        save
-        '''
         saver_ckpt = tf.compat.v1.train.Saver()
-        '''
-        ***********************************************
-        '''
 
-        '''
-        ***********************************************
-        best epoch recording current run
-        '''
         best_auc = 0
         best_f1 = 0
         best_recall = None
@@ -85,69 +63,51 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
 
         best_auc_eval = 0
         best_r10_eval = 0
-        '''
-        ***********************************************
-        '''
 
-        # top-K evaluation settings
         user_list_eval, train_record_eval, test_record_eval, \
             item_set_eval, k_list_eval = topk_settings(show_topk, train_data, eval_data, n_item, seed=args.seed)
         args.seed += 1
-        print('----------')
-        print(args.seed)
-        print('----------')
 
         user_list_test, train_record_test, test_record_test, \
             item_set_test, k_list_test = topk_settings(show_topk, train_data, test_data, n_item, seed=args.seed)
         args.seed += 1
-        print('----------')
-        print(args.seed)
-        print('----------')
-
-        print('Users for evaluation:')
-        print(user_list_eval)
-        print('Users for testing:')
-        print(user_list_test)
 
         config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
         with tf.compat.v1.Session(config=config) as sess:
             sess.run(tf.compat.v1.global_variables_initializer())
 
-            '''
-            ***********************************************
-            loading
-            '''
             if not (args.logging == 'save'):
                 ckpt = tf.train.get_checkpoint_state(os.path.dirname(ckpt_restore_path + 'checkpoint'))
-                print(ckpt.model_checkpoint_path)
                 if ckpt and ckpt.model_checkpoint_path:
                     saver_ckpt.restore(sess, ckpt.model_checkpoint_path)
                     print('================Done loading======================')
             else:
                 print('Initialized from scratch')
-            '''
-            ***********************************************
-            '''
 
             for step in range(args.n_epochs):
-                # training
                 np.random.shuffle(train_data)
                 start = 0
-                # skip the last incomplete minibatch if its size < batch size
+
+                epoch_train_loss = []  # New: To store the loss for each epoch
+
                 while start + args.batch_size <= train_data.shape[0]:
                     _, loss = model.train(sess, get_feed_dict(args, model, train_data, start, start + args.batch_size))
+                    epoch_train_loss.append(loss)
                     start += args.batch_size
                     if show_loss:
                         print(start, loss)
 
-                '''
-                ***********************************************
-                result logging
-                '''
+                avg_train_loss = np.mean(epoch_train_loss)  #  Calculate the average loss for the epoch
+                print('epoch %d    train_loss: %.4f' % (step, avg_train_loss))  # New: Print the average loss
+
+                train_losses.append(avg_train_loss)  # Store the average loss
+
+                with open('../result/{}_{}_train_loss_{}.txt'.format(args.model_type, args.dataset, args.att), 'w') as f:
+                    for index, avg_train_loss in enumerate(train_losses):
+                        f.write('epoch:{:2d} train_loss:{:.4f}\n'.format(index, avg_train_loss))
+
                 if show_ctr:
-                    
-                    # CTR evaluation
                     train_auc, train_f1 = ctr_eval(args, sess, model, train_data, args.batch_size)
                     eval_auc, eval_f1 = ctr_eval(args, sess, model, eval_data, args.batch_size)
                     test_auc, test_f1 = ctr_eval(args, sess, model, test_data, args.batch_size)
@@ -156,7 +116,7 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
                           % (step, train_auc, train_f1, eval_auc, eval_f1, test_auc, test_f1))
 
                     eval_logging_ctr(args, step, train_auc, train_f1, eval_auc, eval_f1, test_auc, test_f1)
-                    if eval_auc>best_auc_eval:
+                    if eval_auc > best_auc_eval:
                         best_auc_epoch = step
                         best_auc_eval = eval_auc
                         best_auc = test_auc
@@ -169,58 +129,19 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
                         np.save('../output/{}_{}_entity_emb.npy'.format(args.model_type, args.dataset), entity_embedding)
                         np.save('../output/{}_{}_relation_emb.npy'.format(args.model_type, args.dataset), relation_embedding)
 
-                        # saver_ckpt.save(sess, ckpt_save_path_1+'weights', global_step=step)
-                '''
-                ***********************************************
-                '''
-
-                # top-K evaluation
                 if show_topk:
-                    # validation
                     eval_precision, eval_recall = topk_eval(
                         args, sess, model, user_list_eval, train_record_eval, test_record_eval, item_set_eval, k_list_eval, args.batch_size)
-                    print('eval precision: ', end='')
-                    for i in eval_precision:
-                        print('%.4f\t' % i, end='')
-                    print()
-                    print('eval recall   : ', end='')
-                    for i in eval_recall:
-                        print('%.4f\t' % i, end='')
-                    print('')
-
-                    # testing
                     test_precision, test_recall = topk_eval(
                         args, sess, model, user_list_test, train_record_test, test_record_test, item_set_test, k_list_test, args.batch_size)
-                    print('test precision: ', end='')
-                    for i in test_precision:
-                        print('%.4f\t' % i, end='')
-                    print()
-                    print('test recall   : ', end='')
-                    for i in test_recall:
-                        print('%.4f\t' % i, end='')
-                    print('\n')
 
-
-                    '''
-                    ***********************************************
-                    result logging
-                    '''
                     eval_logging_topk(args, step, eval_precision, eval_recall, test_precision, test_recall)
-                    if eval_recall[3]>best_r10_eval:
+                    if eval_recall[3] > best_r10_eval:
                         best_recall_epoch = step
                         best_r10_eval = eval_recall[3]
                         best_recall = test_recall
                         best_precision = test_precision
 
-                        # saver_ckpt.save(sess, ckpt_save_path_2+'weights', global_step=step)
-                    '''
-                    ***********************************************
-                    '''
-
-        '''
-        ***********************************************
-        best result recording
-        '''
         if show_ctr:
             auc.append(best_auc)
             f1_score.append(best_f1)
@@ -230,14 +151,7 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
         if show_topk:
             epochs_recall.append(best_recall_epoch)
             epochs_auc.append(best_auc_epoch)
-        '''
-        ***********************************************
-        '''
 
-    '''
-    ***********************************************
-    average performance
-    '''
     if show_ctr and show_topk:
         auc = np.array(auc)
         f1_score = np.array(f1_score)
@@ -265,9 +179,7 @@ def train_n_runs(args, data, show_loss, show_topk, show_ctr):
         print(printings_precision)
 
         logging_final(args, printings_auc, printings_f1, printings_recall, printings_precision)
-    '''
-    ***********************************************
-    '''
+    print("average train_Loss", np.mean(train_losses))  # New: Print average losses after training
 
 '''
 ***********************************************
@@ -307,7 +219,7 @@ def eval_logging_topk(args, epoch, eval_pr, eval_re, test_pr, test_re):
     result_type = ['epoch:{:2d} eval precision: '.format(epoch), 'eval recall: '.format(epoch),
                    'epoch:{:2d} test precision: '.format(epoch), 'test recall: '.format(epoch)]
     results = [eval_pr, eval_re, test_pr, test_re]
-    for i, result in enumerate(results):    
+    for i, result in enumerate(results):
         printings = result_type[i]
         for j in result:
             printings = printings + '{:.4f}\t'.format(j)
