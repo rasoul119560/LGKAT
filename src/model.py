@@ -51,7 +51,6 @@ class KGCN(object):
         self.alg_type = args.alg_type
         self.model_type = args.model_type
         self.smoothing_steps = args.smoothing_steps
-
         self.norm_adj = user_item_adj  # To do
         self.n_nonzero_elems = self.norm_adj.count_nonzero()
 
@@ -62,8 +61,8 @@ class KGCN(object):
         self.node_dropout_flag = args.node_dropout_flag
 
         # Create Model Parameters (i.e., Initialize Weights).
-        if self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'NGCF', 'GCN', 'GCMC',
-                               'LightGCN']:
+        if self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'KGCN_MGCDF', 'NGCF', 'GCN', 'GCMC',
+                               'LightGCN', 'MGCDF']:
             self.weights_ngcf = self._init_weights_ngcf()
 
         self.att = args.att  # or 'u_r'
@@ -78,7 +77,7 @@ class KGCN(object):
         # item embeddings aggregation from KGCN and CF
         self.agg_type = args.agg_type
         self.alpha = args.alpha
-
+        self.beta = args.beta
         if self.agg_type in ['gcn', 'graphsage', 'bi']:
             self.weights_agg = self._init_weights_agg()
         '''
@@ -143,7 +142,7 @@ class KGCN(object):
             # [batch_size, dim]
             self.item_embeddings_final, self.aggregators = self.aggregate(entities, relations)
 
-        elif self.model_type in ['GCMC', 'NGCF', 'GCN', 'LightGCN']:
+        elif self.model_type in ['GCMC', 'NGCF', 'GCN', 'LightGCN', 'MGDCF']:
             # ngcf, gcn or gcmc for user and item embeddings
             if self.alg_type == 'ngcf':
                 self.ua_embeddings, self.ia_embeddings = self._create_ngcf_embed()
@@ -153,13 +152,15 @@ class KGCN(object):
                 self.ua_embeddings, self.ia_embeddings = self._create_gcmc_embed()
             elif self.alg_type == 'lightgcn':
                 self.ua_embeddings, self.ia_embeddings = self._create_lightgcn_embed()
+            elif self.alg_type == 'mgdcf':
+                self.ua_embeddings, self.ia_embeddings = self._create_mgdcf_embed()
             else:
                 raise Exception("Unknown alg_type: " + self.alg_type)
 
             self.user_embeddings_final = tf.nn.embedding_lookup(params=self.ua_embeddings, ids=self.user_indices)
             self.item_embeddings_final = tf.nn.embedding_lookup(params=self.ia_embeddings, ids=self.item_indices)
 
-        elif self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN']:
+        elif self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'KGCN_MGDCF']:
             # ngcf, gcn or gcmc for user embeddings
             if self.alg_type == 'ngcf':
                 self.ua_embeddings, self.ia_embeddings = self._create_ngcf_embed()
@@ -169,6 +170,8 @@ class KGCN(object):
                 self.ua_embeddings, self.ia_embeddings = self._create_gcmc_embed()
             elif self.alg_type == 'lightgcn':
                 self.ua_embeddings, self.ia_embeddings = self._create_lightgcn_embed()
+            elif self.alg_type == 'mgdcf':
+                self.ua_embeddings, self.ia_embeddings = self._create_mgdcf_embed()
             else:
                 raise Exception("Unknown alg_type: " + self.alg_type)
             # [batch_size, dim]
@@ -473,6 +476,33 @@ class KGCN(object):
         u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
         return u_g_embeddings, i_g_embeddings
 
+    def _create_mgdcf_embed(self):
+        n_fold = 100
+        if self.node_dropout_flag:
+            A_fold_hat = self._split_A_hat_node_dropout(self.norm_adj)
+        else:
+            A_fold_hat = self._split_A_hat(self.norm_adj)
+
+        ego_embeddings = tf.concat([self.user_emb_matrix, self.entity_emb_matrix[:self.n_item, :]], axis=0)
+        all_embeddings = [ego_embeddings]
+
+        for k in range(0, self.n_layers):
+            temp_embed = []
+            for f in range(n_fold):
+                # Markov Graph Expansion
+                temp_embed.append(tf.sparse.sparse_dense_matmul(A_fold_hat[f], ego_embeddings))
+
+            side_embeddings = tf.concat(temp_embed, 0)
+
+            # Markov Diffusion
+            ego_embeddings = (1 - self.beta) * side_embeddings + self.beta * ego_embeddings
+            all_embeddings += [ego_embeddings]
+            #α (beta): The Markov combination parameter that determines how much of the new diffusion and how much of the previous embedding is preserved
+        all_embeddings = tf.stack(all_embeddings, 1)
+        all_embeddings = tf.reduce_mean(all_embeddings, axis=1, keepdims=False)
+
+        u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
+        return u_g_embeddings, i_g_embeddings
 
     def _create_ngcf_embed(self):
         if self.node_dropout_flag:
@@ -668,7 +698,7 @@ class KGCN(object):
         self.l2_loss = tf.nn.l2_loss(self.user_emb_matrix) + tf.nn.l2_loss(self.entity_emb_matrix) + \
                        tf.nn.l2_loss(self.relation_emb_matrix)
 
-        if self.model_type in ['KGCN', 'KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN']:
+        if self.model_type in ['KGCN', 'KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'KGCN_MGDCF']:
             for aggregator in self.aggregators:
                 self.l2_loss = self.l2_loss + tf.nn.l2_loss(aggregator.weights)
 
@@ -704,7 +734,7 @@ class KGCN(object):
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.lr).minimize(self.loss)
 
     def train(self, sess, feed_dict):
-        return sess.run([self.optimizer, self.loss], feed_dict)
+        return sess.run([self.optimizer, self.base_loss], feed_dict)
 
     def eval(self, sess, feed_dict):
         labels, scores = sess.run([self.labels, self.scores_normalized], feed_dict)
