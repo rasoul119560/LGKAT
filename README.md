@@ -45,8 +45,7 @@ python main.py --dataset restaurant --aggregator concat --n_epochs 30 --neighbor
 
 ## About implementation
 
-We build our model based on the implementations of Personalized knowledge-aware recommendation with collaborative
-and attentive graph convolutional networks (https://github.com/daiquanyu/COAT).
+We build our model based on the implementations of Personalized knowledge-aware recommendation with collaborative and attentive graph convolutional networks (https://github.com/daiquanyu/COAT).
 
 ## About Datasets
 The datasets available from the corresponding author
