@@ -43,8 +43,6 @@ python main.py --dataset music --aggregator concat --n_epochs 10 --neighbor_samp
 python main.py --dataset restaurant --aggregator concat --n_epochs 30 --neighbor_sample_size 4 --dim 8 --n_iter 2 --batch_size 65536 --l2_weight 1e-7 --lr 2e-2 --layer_size [8] --adj_type norm --alg_type lightgcn --model_type KGCN_LightGCN --node_dropout [0.1] --mess_dropout [0.1] --node_dropout_flag 1 --agg_type weighted_avg --smoothing_steps 1 --pretrain 0 --alpha 0.5 --att h_ur_t --runs 3 --gpu_id 0
 ```
 
-
-
 ## About implementation
 
 We build our model based on the implementations of Personalized knowledge-aware recommendation with collaborative
