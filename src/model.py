@@ -29,7 +29,7 @@ class KGCN(object):
         self.dim = args.dim
         self.l2_weight = args.l2_weight
         self.lr = args.lr
-        self.layer_cl = args.layer_cl
+#        self.layer_cl = args.layer_cl
         if args.aggregator == 'sum':
             self.aggregator_class = SumAggregator
         elif args.aggregator == 'concat':
@@ -61,8 +61,7 @@ class KGCN(object):
         self.node_dropout_flag = args.node_dropout_flag
 
         # Create Model Parameters (i.e., Initialize Weights).
-        if self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'KGCN_MGCDF', 'KGCN_XSIMGCL'
-                               'NGCF', 'GCN', 'GCMC', 'LightGCN', 'MGCDF', 'XSIMGCL']:
+        if self.model_type in ['KGCN_NGCF', 'KGCN_LightGCN', 'NGCF', 'LightGCN']:
             self.weights_ngcf = self._init_weights_ngcf()
 
         self.att = args.att  # or 'u_r'
@@ -77,7 +76,7 @@ class KGCN(object):
         # item embeddings aggregation from KGCN and CF
         self.agg_type = args.agg_type
         self.alpha = args.alpha
-        self.beta = args.beta
+#        self.beta = args.beta
         if self.agg_type in ['gcn', 'graphsage', 'bi']:
             self.weights_agg = self._init_weights_agg()
         '''
@@ -142,41 +141,24 @@ class KGCN(object):
             # [batch_size, dim]
             self.item_embeddings_final, self.aggregators = self.aggregate(entities, relations)
 
-        elif self.model_type in ['GCMC', 'NGCF', 'GCN', 'LightGCN', 'MGDCF', 'XSIMGCL']:
+        elif self.model_type in ['NGCF', 'LightGCN']:
             # ngcf, gcn or gcmc for user and item embeddings
             if self.alg_type == 'ngcf':
                 self.ua_embeddings, self.ia_embeddings = self._create_ngcf_embed()
-            elif self.alg_type == 'gcn':
-                self.ua_embeddings, self.ia_embeddings = self._create_gcn_embed()
-            elif self.alg_type == 'gcmc':
-                self.ua_embeddings, self.ia_embeddings = self._create_gcmc_embed()
             elif self.alg_type == 'lightgcn':
                 self.ua_embeddings, self.ia_embeddings = self._create_lightgcn_embed()
-            elif self.alg_type == 'mgdcf':
-                self.ua_embeddings, self.ia_embeddings = self._create_mgdcf_embed()
-            elif self.alg_type == 'xsimgcl':
-                self.ua_embeddings, self.ia_embeddings = self._create_xsimgcl_embed()
             else:
                 raise Exception("Unknown alg_type: " + self.alg_type)
 
             self.user_embeddings_final = tf.nn.embedding_lookup(params=self.ua_embeddings, ids=self.user_indices)
             self.item_embeddings_final = tf.nn.embedding_lookup(params=self.ia_embeddings, ids=self.item_indices)
 
-        elif self.model_type in ['KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'KGCN_MGDCF', 'KGCN_XSIMGCL']:
+        elif self.model_type in ['KGCN_NGCF', 'KGCN_LightGCN']:
             # ngcf, gcn or gcmc for user embeddings
             if self.alg_type == 'ngcf':
                 self.ua_embeddings, self.ia_embeddings = self._create_ngcf_embed()
-            elif self.alg_type == 'gcn':
-                self.ua_embeddings, self.ia_embeddings = self._create_gcn_embed()
-            elif self.alg_type == 'gcmc':
-                self.ua_embeddings, self.ia_embeddings = self._create_gcmc_embed()
             elif self.alg_type == 'lightgcn':
                 self.ua_embeddings, self.ia_embeddings = self._create_lightgcn_embed()
-            elif self.alg_type == 'mgdcf':
-                self.ua_embeddings, self.ia_embeddings = self._create_mgdcf_embed()
-            elif self.alg_type == 'xsimgcl':
-                self.ua_embeddings, self.ia_embeddings = self._create_xsimgcl_embed()
-
             else:
                 raise Exception("Unknown alg_type: " + self.alg_type)
             # [batch_size, dim]
@@ -389,14 +371,6 @@ class KGCN(object):
                         shape=[1, self.weight_size_list[k + 1]], initializer=KGCN.get_initializer(),
                         name='b_bi_{}_{}'.format(k, self.model_type))
 
-                if self.alg_type == 'gcmc':
-                    all_weights['W_mlp_%d' % k] = tf.compat.v1.get_variable(
-                        shape=[self.weight_size_list[k], self.weight_size_list[k + 1]],
-                        initializer=KGCN.get_initializer(), name='W_mlp_{}_{}'.format(k, self.model_type))
-                    all_weights['b_mlp_%d' % k] = tf.compat.v1.get_variable(
-                        shape=[1, self.weight_size_list[k + 1]], initializer=KGCN.get_initializer(),
-                        name='b_mlp_{}_{}'.format(k, self.model_type))
-
                 if self.alg_type == 'lightgcn':
                     all_weights['W_lt_%d' % k] = tf.compat.v1.get_variable(
                         shape=[self.weight_size_list[k], self.weight_size_list[k + 1]],
@@ -481,33 +455,6 @@ class KGCN(object):
         u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
         return u_g_embeddings, i_g_embeddings
 
-    def _create_mgdcf_embed(self):
-        n_fold = 100
-        if self.node_dropout_flag:
-            A_fold_hat = self._split_A_hat_node_dropout(self.norm_adj)
-        else:
-            A_fold_hat = self._split_A_hat(self.norm_adj)
-
-        ego_embeddings = tf.concat([self.user_emb_matrix, self.entity_emb_matrix[:self.n_item, :]], axis=0)
-        all_embeddings = [ego_embeddings]
-
-        for k in range(0, self.n_layers):
-            temp_embed = []
-            for f in range(n_fold):
-                # Markov Graph Expansion
-                temp_embed.append(tf.sparse.sparse_dense_matmul(A_fold_hat[f], ego_embeddings))
-
-            side_embeddings = tf.concat(temp_embed, 0)
-
-            # Markov Diffusion
-            ego_embeddings = (1 - self.beta) * side_embeddings + self.beta * ego_embeddings
-            all_embeddings += [ego_embeddings]
-            #α (beta): The Markov combination parameter that determines how much of the new diffusion and how much of the previous embedding is preserved
-        all_embeddings = tf.stack(all_embeddings, 1)
-        all_embeddings = tf.reduce_mean(all_embeddings, axis=1, keepdims=False)
-
-        u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
-        return u_g_embeddings, i_g_embeddings
 
     def _create_ngcf_embed(self):
         if self.node_dropout_flag:
@@ -556,116 +503,6 @@ class KGCN(object):
         u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
         return u_g_embeddings, i_g_embeddings
 
-    def _create_gcn_embed(self):
-        if self.node_dropout_flag:
-            # node dropout.
-            temp = self._convert_sp_mat_to_sp_tensor(self.norm_adj)
-            A = self._dropout_sparse(temp, 1 - self.node_dropout[0], self.n_nonzero_elems)
-        else:
-            A = self._convert_sp_mat_to_sp_tensor(self.norm_adj)
-
-        embeddings = tf.concat([self.user_emb_matrix, self.entity_emb_matrix[:self.n_item, :]], axis=0)  # E
-        # embeddings = tf.concat([self.user_emb_matrix, self.item_emb_matrix], axis=0)  # E
-
-        all_embeddings = [embeddings]
-
-        for k in range(0, self.n_layers):
-            for _ in range(self.smoothing_steps):
-                embeddings = tf.sparse.sparse_dense_matmul(A, embeddings)
-
-            embeddings = tf.nn.leaky_relu(
-                tf.matmul(embeddings, self.weights_ngcf['W_gc_%d' % k]) + self.weights_ngcf['b_gc_%d' % k])
-            embeddings = tf.nn.dropout(embeddings, rate=1 - (1 - self.mess_dropout[k]))
-
-            all_embeddings += [embeddings]
-
-        # # Method 1
-        # all_embeddings = tf.concat(all_embeddings, 1)  # Eq. (9)
-        # # Method 2
-        # all_embeddings = all_embeddings[-1]
-        # Method 3
-        all_embeddings = tf.add_n(all_embeddings)
-
-        u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
-        return u_g_embeddings, i_g_embeddings
-
-    def _create_gcmc_embed(self):
-        if self.node_dropout_flag:
-            # node dropout.
-            temp = self._convert_sp_mat_to_sp_tensor(self.norm_adj)
-            A = self._dropout_sparse(temp, 1 - self.node_dropout[0], self.n_nonzero_elems)
-        else:
-            A = self._convert_sp_mat_to_sp_tensor(self.norm_adj)
-
-        embeddings = tf.concat([self.user_emb_matrix, self.entity_emb_matrix[:self.n_item, :]], axis=0)  # E
-        # embeddings = tf.concat([self.user_emb_matrix, self.item_emb_matrix], axis=0)  # E
-
-        all_embeddings = []
-
-        for k in range(0, self.n_layers):
-            for _ in range(self.smoothing_steps):
-                embeddings = tf.sparse.sparse_dense_matmul(A, embeddings)
-            # convolutional layer.
-            embeddings = tf.nn.relu(
-                tf.matmul(embeddings, self.weights_ngcf['W_gc_%d' % k]) + self.weights_ngcf['b_gc_%d' % k])
-            # dense layer.
-            mlp_embeddings = tf.nn.relu(
-                tf.matmul(embeddings, self.weights_ngcf['W_mlp_%d' % k]) + self.weights_ngcf['b_mlp_%d' % k])
-            # mlp_embeddings = tf.matmul(embeddings, self.weights_ngcf['W_mlp_%d' %k]) + self.weights_ngcf['b_mlp_%d' %k]
-            # mlp_embeddings = tf.nn.dropout(mlp_embeddings, 1 - self.mess_dropout[k])
-
-            all_embeddings += [mlp_embeddings]
-
-        # # Method 1
-        # all_embeddings = tf.concat(all_embeddings, 1)   # Eq. (9)
-        # # Method 2
-        # all_embeddings = all_embeddings[-1]
-        # Method 3
-        all_embeddings = tf.add_n(all_embeddings)
-
-        u_g_embeddings, i_g_embeddings = tf.split(all_embeddings, [self.n_user, self.n_item], 0)
-        return u_g_embeddings, i_g_embeddings
-
-    def _create_xsimgcl_embed(self, perturbed=False):
-        n_fold = 100
-        if self.node_dropout_flag:
-            A_fold_hat = self._split_A_hat_node_dropout(self.norm_adj)
-        else:
-            A_fold_hat = self._split_A_hat(self.norm_adj)
-
-        # هماهنگ کردن ابعاد آرایه‌های اولیه
-        ego_embeddings = tf.concat([self.user_emb_matrix, self.entity_emb_matrix[:self.n_item, :]], axis=0)
-        all_embeddings = []
-        all_embeddings_cl = ego_embeddings
-
-        for k in range(self.n_layers):
-            temp_embed = []
-            for f in range(n_fold):
-                temp_embed.append(tf.sparse.sparse_dense_matmul(A_fold_hat[f], ego_embeddings))
-
-            ego_embeddings = tf.concat(temp_embed, axis=0)
-
-            if perturbed:
-                random_noise = tf.random.uniform(tf.shape(ego_embeddings), dtype=tf.float32)
-                random_noise = tf.nn.l2_normalize(random_noise, axis=-1)
-                ego_embeddings += tf.sign(ego_embeddings) * random_noise * self.eps
-
-            all_embeddings.append(ego_embeddings)
-
-            if k == self.layer_cl - 1:
-                all_embeddings_cl = ego_embeddings
-
-        final_embeddings = tf.stack(all_embeddings, axis=1)
-        final_embeddings = tf.reduce_mean(final_embeddings, axis=1, keepdims=False)
-
-        # هماهنگ کردن ابعاد خروجی‌ها
-        user_all_embeddings, item_all_embeddings = tf.split(final_embeddings, [self.n_user, self.n_item], axis=0)
-        user_all_embeddings_cl, item_all_embeddings_cl = tf.split(all_embeddings_cl, [self.n_user, self.n_item],
-                                                                  axis=0)
-
-        if perturbed:
-            return user_all_embeddings, item_all_embeddings, user_all_embeddings_cl, item_all_embeddings_cl
-        return user_all_embeddings, item_all_embeddings
 
         '''
     *****************************************
@@ -744,7 +581,7 @@ class KGCN(object):
         self.l2_loss = tf.nn.l2_loss(self.user_emb_matrix) + tf.nn.l2_loss(self.entity_emb_matrix) + \
                        tf.nn.l2_loss(self.relation_emb_matrix)
 
-        if self.model_type in ['KGCN', 'KGCN_NGCF', 'KGCN_GCMC', 'KGCN_GCN', 'KGCN_LightGCN', 'KGCN_MGDCF', 'KGCN_XSIMGCL']:
+        if self.model_type in ['KGCN', 'KGCN_NGCF', 'KGCN_LightGCN']:
             for aggregator in self.aggregators:
                 self.l2_loss = self.l2_loss + tf.nn.l2_loss(aggregator.weights)
 
